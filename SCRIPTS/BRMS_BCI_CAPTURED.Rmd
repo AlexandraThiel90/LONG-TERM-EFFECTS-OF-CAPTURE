@@ -1,0 +1,211 @@
+---
+title: "BRMS_BCI_CAPTURED"
+author: "Alexandra Thiel"
+date: "2023-10-26"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+rm(list=ls())
+options(scipen=999)
+
+library(bayesmove)
+library(dplyr)
+library(ggplot2)
+library(purrr)
+library(tidyr)
+library(lubridate)
+library(furrr)
+library(data.table)
+library(mcp)
+library(readxl)
+library(stringr)
+
+library(cowplot)
+
+library(cmdstanr)
+
+cmdstanr::check_cmdstan_toolchain(fix = TRUE)
+# if you already had the latest version of CmdStan install
+#cmdstanr::install_cmdstan(dir = "C:/Users/AlexandT", overwrite = TRUE) 
+set_cmdstan_path("C:/Users/AlexandT/cmdstan-2.32.2")
+
+library(rstan)
+# remove.packages(c("cmdstanr"))
+cmdstan_path()
+#remotes::install_github("paul-buerkner/brms")
+library(brms)
+library(emmeans)
+library(modelr)
+library(ggdist)
+library(ggeffects)
+
+
+```
+
+```{r data}
+
+DF <- fread("./DATA/BCI_CAPTURED.dat")
+
+```
+
+```{r prep data}
+
+DF1 <- DF %>% 
+  mutate(StudyArea = case_when(grepl("BD", BearID) ~ "North",
+                            grepl("W", BearID) ~"South")) %>% 
+  filter(between(BCI, -5, 5)) %>% 
+  mutate(Year = year(MarkingDate),
+         BearID = as.factor(BearID),
+         CaptureSeason = as.factor(CaptureSeason),
+         StudyArea = as.factor(StudyArea),
+         Sex = as.factor(Sex))
+
+```
+
+```{r exploration}
+
+# Density plot of BCI
+DF1 %>% 
+  ggplot()+
+  geom_density(aes(x = BCI))
+
+# BCI ~ Age
+DF1 %>% 
+  ggplot(aes(x = Age, y = BCI))+
+  geom_point()+
+  geom_smooth(method = "lm")
+
+# BCI ~ Age + Study Area
+DF1 %>% 
+  ggplot(aes(x = Age, y = BCI))+
+  geom_point()+
+  geom_smooth(method = "lm")+
+  facet_wrap(~StudyArea)
+
+# BCI ~ Body mass
+DF1 %>% 
+  ggplot(aes(x = LifeWeight, y = BCI))+
+  geom_point()+
+  geom_smooth(method = "lm")
+
+# BCI ~ Body length
+DF1 %>% 
+  ggplot(aes(x = BodyLength, y = BCI))+
+  geom_point()+
+  geom_smooth(method = "lm")
+
+# BCI ~ NrCapture
+DF1 %>% 
+  ggplot(aes(x = NrCapture, y = BCI))+
+  geom_point()+
+  geom_smooth(method = "lm")
+
+# BCI ~ Year
+DF1 %>% 
+  ggplot(aes(x = Year, y = BCI))+
+  geom_point()+
+  geom_smooth(method = "lm")
+
+```
+
+
+```{r model formulas}
+
+# "NULL" model with only non-capture related variables that can influence BCI
+f1 <- bf(BCI ~ Sex + Age + StudyArea + Capture_yday +
+          (1|BearID) +
+           (1|Year))
+
+# + NrCapture
+f2 <- bf(BCI ~ Sex + Age + StudyArea + Capture_yday +
+           NrCapture +
+          (1|BearID) +
+           (1|Year))
+  
+```
+
+```{r run models}
+
+fit1 <- brm(formula = f1,
+            family= gaussian(),
+            data= DF1,
+            chains = 3,
+            warmup = 1000,
+            iter = 5000,
+            cores= 9,
+            thin = 10,
+            control = list(adapt_delta = 0.999, max_treedepth = 15)
+           )
+
+saveRDS(fit1, file = "./MODELS/BCI_CAPTURED_m1.rda")
+
+
+fit2 <- brm(formula = f2,
+            family= gaussian(),
+            data= DF1,
+            chains = 3,
+            warmup = 1000,
+            iter = 5000,
+            cores= 9,
+            thin = 10,
+            control = list(adapt_delta = 0.999, max_treedepth = 15)
+           )
+
+saveRDS(fit2, file = "./MODELS/BCI_CAPTURED_m2.rda")
+
+
+```
+
+```{r}
+
+
+summary(fit2)
+
+pp_check(fit2, ndraws = 100)
+
+mcmc_plot(fit2)
+
+plot(conditional_effects(fit2))
+
+nd <- new_data(fit1, c("Capture_yday [120]", "Age[1:29]",  "Sex[F]", "StudyArea[South]"))
+
+pred <- fitted(fit1, re_formula = NA, newdata = nd)
+
+pred <- cbind(nd, pred)
+
+pred %>% 
+  ggplot()+
+  geom_ribbon(aes(x = Age, ymin = Q2.5, ymax = Q97.5), alpha = 0.5)+
+  geom_line(aes(x = Age, y = Estimate))
+
+```
+
+```{r}
+
+loo1 <- loo(fit1)
+loo2 <- loo(fit2)
+
+loo_compare(loo1, loo2)
+
+loo_model_weights(fit1, fit2)
+
+```
+
+```{r}
+
+nd <- new_data(fit2, c("Capture_yday [120]", "Age[20]",  "Sex[F]", "StudyArea[South]", "NrCapture[1:16]"))
+
+pred <- fitted(fit2, re_formula = NA, newdata = nd)
+
+pred <- cbind(nd, pred)
+
+pred %>% 
+  ggplot()+
+  geom_ribbon(aes(x = NrCapture, ymin = Q2.5, ymax = Q97.5), alpha = 0.5)+
+  geom_line(aes(x = NrCapture, y = Estimate))
+
+```
+

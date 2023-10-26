@@ -1,0 +1,88 @@
+---
+title: "PREPARE_SURVIVAL_DATA"
+author: "Alexandra Thiel"
+date: "2023-10-26"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+library(data.table)
+library(tidyverse)
+library()
+```
+
+```{r data}
+
+REPRO <- read_excel("./DATA/Bear_data_2022.xlsx", sheet = 3)
+
+```
+
+```{r prep data}
+
+R1 <- REPRO %>% 
+  filter(!sex == "M") %>% #filter out all male cubs
+  filter(!Jan %in% c("m", "l")) #filter out all cubs in general and all bears that are defined as single during hibernation
+
+R2 <- R1 %>% 
+  arrange(objectid, year) %>% 
+  mutate(CUB_AGE = case_when(Jan == "b" & cubage == 0 ~ "COY", 
+                             cubage == 1 ~ "YEARLING",
+                             cubage == 2 ~ "TWOYEAROLD",
+                             TRUE ~ "unknown")) %>% # define cub age
+  filter(!CUB_AGE == "unknown") %>% 
+  mutate_if(is.character, as.factor)
+
+R3 <- R2 %>% 
+  rowwise() %>%
+  mutate(CUB_FAITH = case_when(any(c_across(Jan:Dec) == "l") ~ "LOST_CUB/SEPARATED",
+                              TRUE ~ "TOGETHER")) %>% 
+  mutate(SEPARATION_TIMING = case_when(CUB_FAITH == "LOST_CUB/SEPARATED" & 
+                                         any(c_across(Jan:Dec) %in% c("1", "2", "3", "4")) &  
+                                               observation == "x" ~ 
+                                               "ACTIVE",
+                                       CUB_FAITH == "TOGETHER" ~ "TOGETHER",
+                                       CUB_FAITH == "LOST_CUB/SEPARATED" &
+                                         CUB_AGE == "COY" &
+                                         Jan == "b" & Apr == "l" | 
+                                         Jan == "b" & Apr == "NA" & May == "l" |
+                                         Jan == "b" & Apr == "NA" & May == "NA" & Jun == "l" ~
+                                         "HIBERNATION",
+                                             TRUE ~ "unknown"))
+
+R4 <- R3 %>% 
+  mutate(Apr1 = as.numeric(as.character(Apr)),
+         May1 = as.numeric(as.character(May)),
+         Jun1 = as.numeric(as.character(Jun)),
+         Jul1 = as.numeric(as.character(Jul)),
+         Aug1 = as.numeric(as.character(Aug)),
+         Sep1 = as.numeric(as.character(Sep)),
+         Oct1 = as.numeric(as.character(Oct)),
+         Nov1 = as.numeric(as.character(Nov)),
+         Dec1 = as.numeric(as.character(Dec))) %>% 
+  rowwise() %>%
+  mutate(min = min(Apr1, May1, Jun1, Jul1, Aug1, Sep1, Oct1, Nov1, Dec1, na.rm = TRUE)) %>% 
+  dplyr::select(-c(Apr1:Dec1)) %>% 
+  mutate(numberofcubsfirstcount = as.numeric(as.character(numberofcubsfirstcount))) %>% 
+  mutate(Nr_CUBS_LOST = numberofcubsfirstcount - min) %>% 
+  mutate(PARTIAL_LOSS = case_when(CUB_FAITH == "TOGETHER" & Nr_CUBS_LOST > 0 ~ "yes",
+                                  CUB_FAITH == "LOST_CUB/SEPARATED" & Nr_CUBS_LOST == 0 ~ "all",
+                                  TRUE ~ "no")) 
+
+R5 <- R4 %>% 
+  mutate(PARTIAL_LOSS = case_when(min == "Inf" ~ NA, 
+                                  TRUE ~ PARTIAL_LOSS),
+         Nr_CUBS_LOST = case_when(!Nr_CUBS_LOST %in% c(0, 1,2,3,4) ~ NA,
+                                  TRUE ~ Nr_CUBS_LOST))
+
+fwrite(R5, "./DATA/SURVIVAL_MOTHER_CUBS.dat")
+
+```
+
+```{r exploratory summary}
+
+xtabs(data = R5, ~ CUB_FAITH + CUB_AGE)
+
+```
+
