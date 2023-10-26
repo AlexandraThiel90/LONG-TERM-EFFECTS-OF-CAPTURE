@@ -139,10 +139,15 @@ MERGED1 %>%
 ```{r explore with frequentist model}
 
 DF <- MERGED1 %>% 
-  filter(between(BCI, -5, 5)) %>% 
-  mutate(BearID = as.factor(BearID))
+  #filter(between(BCI, -5, 5)) %>% 
+  mutate(BearID = as.factor(BearID)) %>% 
+  mutate(Capture_month = month(MarkingDate),
+         Capture_Season = case_when(Capture_month %in% c(2,3) ~ "Winter",
+                                    Capture_month %in% c(6) & ReasonImmob == "Hibernation/blood sampling" ~ "Summer", TRUE ~ "Spring"))
 
-m1 <- gam(BCI ~ NrCapture + Age + Capture_yday + Winter_Spring + s(BearID, bs = "re"), 
+fwrite(DF, "./DATA/BCI_CAPTURED.dat")
+
+m1 <- gam(BCI ~ NrCapture + Age + Capture_yday + Capture_Season + s(BearID, bs = "re"), 
           data = DF)
 
 plot(ggpredict(m1))
