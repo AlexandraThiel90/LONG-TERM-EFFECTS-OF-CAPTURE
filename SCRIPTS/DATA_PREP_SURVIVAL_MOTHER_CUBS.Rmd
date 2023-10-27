@@ -10,16 +10,38 @@ editor_options:
 ```{r setup, include=FALSE}
 library(data.table)
 library(tidyverse)
-library()
+library(readxl)
 ```
 
 ```{r data}
 
 REPRO <- read_excel("./DATA/Bear_data_2022.xlsx", sheet = 3)
 
+AGE <- read_excel("./DATA/Bear_data_2022.xlsx", sheet = 4)
+
+CAP <- read_excel("./DATA/Bear_data_2022.xlsx", sheet = 1)
+
+
 ```
 
 ```{r prep data}
+
+AGE1 <- AGE %>% 
+  dplyr::select(BearID, Birth)
+
+CAP1 <- CAP %>% 
+  filter(!ReasonImmob == "Marking Attempt Aborted",
+         !(is.na(NrHits) & is.na(NrDarts) & Antidot == 0)) %>% 
+  droplevels() %>% 
+  arrange(BearID, MarkingDate) %>% 
+  group_by(BearID) %>% 
+  mutate(NrCapture = row_number(BearID),
+         Capture_yday = yday(MarkingDate)) %>% 
+  mutate(Bear_Year = paste(BearID, year(MarkingDate), sep = "_")) %>%
+  mutate(Capture = "Capture") %>% 
+  dplyr::select(BearID, Bear_Year, MarkingDate, NrCapture, ReasonImmob, Capture) %>% 
+  group_by(Bear_Year) %>% 
+  filter(row_number()== n())
 
 R1 <- REPRO %>% 
   filter(!sex == "M") %>% #filter out all male cubs
@@ -76,13 +98,27 @@ R5 <- R4 %>%
          Nr_CUBS_LOST = case_when(!Nr_CUBS_LOST %in% c(0, 1,2,3,4) ~ NA,
                                   TRUE ~ Nr_CUBS_LOST))
 
-fwrite(R5, "./DATA/SURVIVAL_MOTHER_CUBS.dat")
+R6 <- R5 %>% 
+  mutate(Bear_Year = paste(objectid, year, sep = "_")) %>% 
+  rename(BearID = objectid,
+         Year = year) %>% 
+  inner_join(AGE1) %>% 
+  mutate(Birth = as.numeric(Birth)) %>% 
+  mutate(Age = Year - Birth) %>% 
+  filter(!is.na(Age)) %>% 
+  mutate(STATUS = case_when(Age <= 6 ~ "primiparous", Age > 6 ~ "adult"))
+
+R7 <- R6 %>% 
+  left_join(CAP1) %>% 
+  mutate(CAPTURE = case_when(is.na(Capture) ~ "No Capture", TRUE ~ Capture))
+
+fwrite(R7, "./DATA/SURVIVAL_MOTHER_CUBS.dat")
 
 ```
 
 ```{r exploratory summary}
 
-xtabs(data = R5, ~ CUB_FAITH + CUB_AGE)
+xtabs(data = R7, ~ CUB_FAITH + CUB_AGE + STATUS + CAPTURE + SEPARATION_TIMING)
 
 ```
 
